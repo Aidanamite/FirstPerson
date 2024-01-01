@@ -12,10 +12,11 @@ using UnityEngine;
 using System.Runtime.CompilerServices;
 using Object = UnityEngine.Object;
 using ConfigTweaks;
+using System.Diagnostics;
 
 namespace FirstPerson
 {
-    [BepInPlugin("com.aidanamite.FirstPerson", "First Person", "1.0.1")]
+    [BepInPlugin("com.aidanamite.FirstPerson", "First Person", "1.1.0")]
     [BepInDependency("com.aidanamite.ConfigTweaks")]
     public class Main : BaseUnityPlugin
     {
@@ -31,6 +32,8 @@ namespace FirstPerson
         public static bool ControlFlightTurn = true;
         [ConfigField]
         public static KeyCode HoldToUnlockMouse = KeyCode.Q;
+        [ConfigField]
+        public static KeyCode GeneralInteract = KeyCode.E;
 
         public void Awake()
         {
@@ -140,26 +143,26 @@ namespace FirstPerson
             Patch_GetKAAxis.blockHorizontal = false;
             Patch_GetKAAxis.blockVertical = false;
             Patch_AvatarVelocityUpdate.HorizontalControl = false;
-            if (Main.Enabled && AvAvatar.pState != AvAvatarState.PAUSED && ___mCamData != null && ___mCamData[(int)___mCurLayer].mode == CaAvatarCam.CameraMode.MODE_RELATIVE && (___mForceFreeRotate || AvAvatar.pState != AvAvatarState.NONE) && (!Main.ThirdPersonFlight || AvAvatar.pSubState == AvAvatarSubState.FLYING || AvAvatar.pSubState == AvAvatarSubState.GLIDING) && AvAvatar.pSubState != AvAvatarSubState.WALLCLIMB && !(MyRoomsIntMain.pInstance && MyRoomsIntMain.pInstance.pIsBuildMode))
+            if (Main.Enabled && ___mCamData != null && ___mCamData[(int)___mCurLayer].mode == CaAvatarCam.CameraMode.MODE_RELATIVE && (___mForceFreeRotate || AvAvatar.pState != AvAvatarState.NONE) && (!Main.ThirdPersonFlight || (AvAvatar.pSubState != AvAvatarSubState.FLYING && AvAvatar.pSubState != AvAvatarSubState.GLIDING)) && AvAvatar.pSubState != AvAvatarSubState.WALLCLIMB && !(MyRoomsIntMain.pInstance && MyRoomsIntMain.pInstance.pIsBuildMode))
             {
                 var data = ___mCamData[(int)___mCurLayer];
-                if (!IsFPSMode)
-                {
-                    IsFPSMode = true;
-                    x = data.lookAt.eulerAngles.y + data.offset.x;
-                    y = data.offset.y;
-                    Main.CheckLockMouse();
-                }
-                if (LockMouse == Input.GetKey(Main.HoldToUnlockMouse))
-                    LockMouse = !LockMouse;
-                var xDelta = LockMouse ? Input.GetAxis("Mouse X") + KAInput.GetAxis("CameraRotationX") : 0;
-                var yDelta = LockMouse ? Input.GetAxis("Mouse Y") + KAInput.GetAxis("CameraRotationY") : 0;
-                x = (x + xDelta * Main.LookSensitivity) % 360;
-                y = Mathf.Clamp(y + -yDelta * Main.LookSensitivity, -90, 90);
-                __instance.camera.transform.rotation = Quaternion.Euler(0, x, 0) * Quaternion.Euler(y, 0, 0);
                 var controller = data.lookAt?.GetComponent<AvAvatarController>();
-                if (controller)
+                if (controller && !(controller.pActiveFishingZone && controller.pActiveFishingZone._CurrentFishingRod))
                 {
+                    if (!IsFPSMode)
+                    {
+                        IsFPSMode = true;
+                        x = data.lookAt.eulerAngles.y + data.offset.x;
+                        y = data.offset.y;
+                        Main.CheckLockMouse();
+                    }
+                    if (LockMouse == (Input.GetKey(Main.HoldToUnlockMouse) || !AvAvatar.pInputEnabled || AvAvatar.pState == AvAvatarState.PAUSED))
+                        LockMouse = !LockMouse;
+                    var xDelta = LockMouse ? Input.GetAxis("Mouse X") + KAInput.GetAxis("CameraRotationX") : 0;
+                    var yDelta = LockMouse ? Input.GetAxis("Mouse Y") + KAInput.GetAxis("CameraRotationY") : 0;
+                    x = (x + xDelta * Main.LookSensitivity) % 360;
+                    y = Mathf.Clamp(y + -yDelta * Main.LookSensitivity, -90, 90);
+                    __instance.camera.transform.rotation = Quaternion.Euler(0, x, 0) * Quaternion.Euler(y, 0, 0);
                     __instance.camera.transform.position = (controller.pPlayerMounted && SanctuaryManager.pCurPetInstance ? SanctuaryManager.pCurPetInstance.GetCameraPos(0.3f) : (data.lookAt.position + Vector3.up * 1.3f));
                     if (!Input.GetKey(KeyCode.LeftAlt) && !(controller.IsFlyingOrGliding() && !Main.ControlFlightTurn))
                     {
@@ -172,7 +175,7 @@ namespace FirstPerson
                             Patch_GetKAAxis.blockVertical = true;
                             var pitchRange = Math.Max(controller.pFlyingData._FlyingMaxDownPitch, controller.pFlyingData._FlyingMaxUpPitch);
                             float rx = Math.Max(-pitchRange, Math.Min(pitchRange, y));
-                            float rz = Math.Max(Math.Min(change / turnRate,1),-1) * controller.pFlyingData._MaxRoll;
+                            float rz = Math.Max(Math.Min(change / turnRate, 1), -1) * controller.pFlyingData._MaxRoll;
                             controller.pFlyingPitch = y / 360;
                             controller._MainRoot.localEulerAngles = new Vector3(rx, 0f, rz);
                             var transform = controller.transform.Find("Wing");
@@ -192,16 +195,21 @@ namespace FirstPerson
                         if (drag)
                             drag.RotateAround(data.lookAt.position, data.lookAt.up, change);
                     }
+                    if (Input.GetMouseButtonUp(1))
+                        Object.FindObjectOfType<UiAvatarCSM>()?.OpenCSM();
+                    else if (Input.GetKeyDown(Main.GeneralInteract))
+                        for (int i = Patch_ContextUI.Enabled.Count - 1; i >= 0; i--)
+                            if (Patch_ContextUI.Enabled[i])
+                            {
+                                Patch_ContextUI.Enabled[i].pUI.OnClick(Patch_ContextUI.Enabled[i]);
+                                break;
+                            }
+                    data.offset.y = y;
+                    data.offset.x = 0;
+                    return false;
                 }
-                else
-                    __instance.camera.transform.position = data.GetLookAt();
-                if (Input.GetMouseButtonUp(1))
-                    Object.FindObjectOfType<UiAvatarCSM>()?.OpenCSM();
-                data.offset.y = y;
-                data.offset.x = 0;
-                return false;
             }
-            else if (IsFPSMode)
+            if (IsFPSMode)
             {
                 IsFPSMode = false;
                 Main.CheckLockMouse();
@@ -223,11 +231,16 @@ namespace FirstPerson
                 Patch_GetKAAxis.blockHorizontal = false;
                 var speed = KAInput.GetAxis("Horizontal");
                 Patch_GetKAAxis.blockHorizontal = true;
-                if (__instance.pSubState == AvAvatarSubState.NORMAL || __instance.pSubState == AvAvatarSubState.DIVESUIT)
+                if (__instance.pSubState != AvAvatarSubState.FLYING && __instance.pSubState != AvAvatarSubState.GLIDING && __instance.pSubState != AvAvatarSubState.SKATING)
                 {
-                    speed *= (__instance.pCurrentStateData._MaxForwardSpeed + __instance.pCurrentStateData._MaxBackwardSpeed) / 2 * (__instance.pPlayerCarrying ? 0.75f : 1f);
-                    if (SanctuaryManager.pCurPetInstance != null && __instance.pPlayerMounted)
-                        speed *= SanctuaryManager.pCurPetInstance.GetMountedSpeedModifer();
+                    speed *= (__instance.pCurrentStateData._MaxForwardSpeed + __instance.pCurrentStateData._MaxBackwardSpeed) / 2;
+                    if (__instance.pSubState == AvAvatarSubState.NORMAL || __instance.pSubState == AvAvatarSubState.DIVESUIT)
+                    {
+                        if (__instance.pPlayerCarrying)
+                            speed *=  0.75f;
+                        if (SanctuaryManager.pCurPetInstance != null && __instance.pPlayerMounted)
+                            speed *= SanctuaryManager.pCurPetInstance.GetMountedSpeedModifer();
+                    }
                 }
                 extra.mCurSpeed = Mathf.Lerp(extra.mCurSpeed, speed, __instance.pCurrentStateData._Acceleration * Time.deltaTime);
                 var vector = __instance.transform.right;
@@ -300,5 +313,40 @@ namespace FirstPerson
         [HarmonyPatch(typeof(AvatarBlink), "Update")]
         [HarmonyPrefix]
         static bool BlinkUpdate() => !Patch_CameraController.IsFPSMode;
+    }
+
+    [HarmonyPatch(typeof(KAWidget))]
+    static class Patch_ContextUI
+    {
+        public static List<KAButton> Enabled = new List<KAButton>();
+        [HarmonyPatch("UpdateVisibility")]
+        [HarmonyPrefix]
+        static void UpdateVisibility(KAWidget __instance, bool inVisible, bool ___mParentVisible, bool ____Visible)
+        {
+
+            if (__instance is KAButton b)
+            {
+                var ind = Enabled.IndexOf(b);
+                if (inVisible && ___mParentVisible && ____Visible)
+                {
+                    if (ind >= 0)
+                        return;
+                    var p = __instance.transform.position;
+                    if (p.x == 0 && p.y < 0)
+                        Enabled.Add(b);
+                }
+                else if (ind >= 0)
+                    Enabled.RemoveAt(ind);
+                //Debug.Log($"Set [{__instance}] visibility to {inVisible && ___mParentVisible && ____Visible}");
+            }
+        }
+        [HarmonyPatch("OnDestroy")]
+        [HarmonyPrefix]
+        static void OnDestroy(KAWidget __instance)
+        {
+            if (__instance is KAButton b)
+                Enabled.Remove(b);
+                //Debug.Log($"Set [{__instance}] visibility to False");
+        }
     }
 }
