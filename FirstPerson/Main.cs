@@ -13,13 +13,70 @@ using System.Runtime.CompilerServices;
 using Object = UnityEngine.Object;
 using ConfigTweaks;
 using System.Diagnostics;
+using System.Globalization;
 
 namespace FirstPerson
 {
-    [BepInPlugin("com.aidanamite.FirstPerson", "First Person", "1.1.0")]
+    [BepInPlugin("com.aidanamite.FirstPerson", "First Person", "1.2.0")]
     [BepInDependency("com.aidanamite.ConfigTweaks")]
     public class Main : BaseUnityPlugin
     {
+        static Main()
+        {
+            TomlTypeConverter.AddConverter(typeof(Dictionary<string, Vector3>), new TypeConverter()
+            {
+                ConvertToObject = (str, type) =>
+                {
+                    var d = new Dictionary<string, Vector3>();
+                    if (str == null)
+                        return d;
+                    var split = str.Split('|');
+                    foreach (var i in split)
+                        if (i.Length != 0)
+                        {
+                            var parts = i.Split(',');
+                            if (parts.Length != 4)
+                                Debug.LogWarning($"Could not load entry \"{i}\". Entries must have exactly 4 values divided by commas" );
+                            else
+                            {
+                                if (d.ContainsKey(parts[0]))
+                                    Debug.LogWarning($"Duplicate entry name \"{parts[0]}\" from \"{i}\". Only last entry will be kept");
+                                var vector = new Vector3();
+                                for (int j = 0; j < 3; j++)
+                                    if (parts[j + 1].Length == 0)
+                                        vector[j] = 0;
+                                    else if (float.TryParse(parts[j + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+                                        vector[j] = v;
+                                    else
+                                        Debug.LogWarning($"Value \"{parts[j + 1]}\" in \"{i}\". Could not be parsed as a number");
+                                d[parts[0]] = vector;
+                            }
+                        }
+                    return d;
+                },
+                ConvertToString = (obj, type) =>
+                {
+                    if (!(obj is Dictionary<string, Vector3> d))
+                        return "";
+                    var str = new StringBuilder();
+                    var k = d.Keys.ToList();
+                    k.Sort();
+                    foreach (var key in k)
+                    {
+                        if (str.Length > 0)
+                            str.Append("|");
+                        str.Append(key);
+                        for (int i = 0; i < 3; i++)
+                        {
+                            str.Append(",");
+                            str.Append(d[key][i].ToString(CultureInfo.InvariantCulture));
+                        }
+                    }
+                    return str.ToString();
+                }
+            });
+        }
+
         [ConfigField]
         public static bool Enabled = true;
         [ConfigField]
@@ -34,9 +91,13 @@ namespace FirstPerson
         public static KeyCode HoldToUnlockMouse = KeyCode.Q;
         [ConfigField]
         public static KeyCode GeneralInteract = KeyCode.E;
+        [ConfigField]
+        public static Dictionary<string, Vector3> RidingCameraOffsets = new Dictionary<string, Vector3>();
 
+        static Main instance;
         public void Awake()
         {
+            instance = this;
             Application.focusChanged += FocusChanged;
             new Harmony("com.aidanamite.FirstPerson").PatchAll();
             Logger.LogInfo("Loaded");
@@ -98,6 +159,15 @@ namespace FirstPerson
             if (Patch_CameraController.updatesSinceUpdate < 32768)
                 Patch_CameraController.updatesSinceUpdate++;
         }
+
+        public static Vector3 GetRidingCameraOffset(string dragon)
+        {
+            if (RidingCameraOffsets.TryGetValue(dragon, out var v))
+                return v;
+            RidingCameraOffsets[dragon] = default;
+            instance.Config.Save();
+            return default;
+        }
     }
 
     static class ExtentionMethods
@@ -109,8 +179,9 @@ namespace FirstPerson
         static FieldInfo _mAvatarMountOffset = typeof(SanctuaryPet).GetField("mAvatarMountOffset", ~BindingFlags.Default);
         public static Vector3 GetCameraPos(this SanctuaryPet pet, float cameraOffset)
         {
+            var customOffset = Main.GetRidingCameraOffset(pet.GetTypeSettings()._Name);
             var t = ((Transform)_mSeatBone.GetValue(pet));
-            return t.position + t.up * cameraOffset + ((Vector3)_mAvatarMountOffset.GetValue(pet));
+            return t.position + t.up * (cameraOffset + customOffset.y) + t.forward * customOffset.z + t.right * customOffset.x + ((Vector3)_mAvatarMountOffset.GetValue(pet));
         }
 
         static FieldInfo _mTurnFactor = typeof(AvAvatarController).GetField("mTurnFactor", ~BindingFlags.Default);
