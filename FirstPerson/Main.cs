@@ -17,7 +17,7 @@ using System.Globalization;
 
 namespace FirstPerson
 {
-    [BepInPlugin("com.aidanamite.FirstPerson", "First Person", "1.2.0")]
+    [BepInPlugin("com.aidanamite.FirstPerson", "First Person", "1.2.1")]
     [BepInDependency("com.aidanamite.ConfigTweaks")]
     public class Main : BaseUnityPlugin
     {
@@ -227,7 +227,7 @@ namespace FirstPerson
                         y = data.offset.y;
                         Main.CheckLockMouse();
                     }
-                    if (LockMouse == (Input.GetKey(Main.HoldToUnlockMouse) || !AvAvatar.pInputEnabled || AvAvatar.pState == AvAvatarState.PAUSED))
+                    if (LockMouse == (Input.GetKey(Main.HoldToUnlockMouse) || !AvAvatar.pInputEnabled || AvAvatar.pState >= AvAvatarState.PAUSED || AvAvatar.pState == AvAvatarState.NONE))
                         LockMouse = !LockMouse;
                     var xDelta = LockMouse ? Input.GetAxis("Mouse X") + KAInput.GetAxis("CameraRotationX") : 0;
                     var yDelta = LockMouse ? Input.GetAxis("Mouse Y") + KAInput.GetAxis("CameraRotationY") : 0;
@@ -266,15 +266,18 @@ namespace FirstPerson
                         if (drag)
                             drag.RotateAround(data.lookAt.position, data.lookAt.up, change);
                     }
-                    if (Input.GetMouseButtonUp(1))
-                        Object.FindObjectOfType<UiAvatarCSM>()?.OpenCSM();
-                    else if (Input.GetKeyDown(Main.GeneralInteract))
-                        for (int i = Patch_ContextUI.Enabled.Count - 1; i >= 0; i--)
-                            if (Patch_ContextUI.Enabled[i])
-                            {
-                                Patch_ContextUI.Enabled[i].pUI.OnClick(Patch_ContextUI.Enabled[i]);
-                                break;
-                            }
+                    if (LockMouse)
+                    {
+                        if (Input.GetMouseButtonUp(1))
+                            Object.FindObjectOfType<UiAvatarCSM>()?.OpenCSM();
+                        else if (Input.GetKeyDown(Main.GeneralInteract))
+                            for (int i = Patch_ContextUI.Enabled.Count - 1; i >= 0; i--)
+                                if (Patch_ContextUI.Enabled[i])
+                                {
+                                    Patch_ContextUI.Enabled[i].pUI.OnClick(Patch_ContextUI.Enabled[i]);
+                                    break;
+                                }
+                    }
                     data.offset.y = y;
                     data.offset.x = 0;
                     return false;
