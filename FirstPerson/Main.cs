@@ -17,7 +17,7 @@ using System.Globalization;
 
 namespace FirstPerson
 {
-    [BepInPlugin("com.aidanamite.FirstPerson", "First Person", "1.2.1")]
+    [BepInPlugin("com.aidanamite.FirstPerson", "First Person", "1.3.0")]
     [BepInDependency("com.aidanamite.ConfigTweaks")]
     public class Main : BaseUnityPlugin
     {
@@ -84,9 +84,7 @@ namespace FirstPerson
         [ConfigField]
         public static float LookSensitivity = 1.5f;
         [ConfigField]
-        public static bool ThirdPersonFlight = false;
-        [ConfigField]
-        public static bool ControlFlightTurn = true;
+        public static FlightMode FlightMode = FlightMode.CameraControlsFlight;
         [ConfigField]
         public static KeyCode HoldToUnlockMouse = KeyCode.Q;
         [ConfigField]
@@ -97,6 +95,25 @@ namespace FirstPerson
         static Main instance;
         public void Awake()
         {
+            var key = Config.OrphanedEntries.Keys.FirstOrDefault(x => x.Key == "ThirdPersonFlight");
+            if (key != null)
+            {
+                if (Config.OrphanedEntries[key].ToLowerInvariant() == "true")
+                    FlightMode = FlightMode.ThirdPerson;
+                Config.OrphanedEntries.Remove(key);
+                key = Config.OrphanedEntries.Keys.FirstOrDefault(x => x.Key == "ControlFlightTurn");
+                if (key != null)
+                    Config.OrphanedEntries.Remove(key);
+                Config.Save();
+            }
+            else
+            {
+                key = Config.OrphanedEntries.Keys.FirstOrDefault(x => x.Key == "ControlFlightTurn");
+                if (Config.OrphanedEntries[key].ToLowerInvariant() == "false")
+                    FlightMode = FlightMode.NoControl;
+                Config.OrphanedEntries.Remove(key);
+                Config.Save();
+            }
             instance = this;
             Application.focusChanged += FocusChanged;
             new Harmony("com.aidanamite.FirstPerson").PatchAll();
@@ -170,6 +187,15 @@ namespace FirstPerson
         }
     }
 
+    public enum FlightMode
+    {
+        ThirdPerson,
+        NoControl,
+        FlightMovesCamera,
+        FlightControlsCamera,
+        CameraControlsFlight
+    }
+
     static class ExtentionMethods
     {
         static FieldInfo _mDraggable = typeof(AvAvatarController).GetField("mDraggable", ~BindingFlags.Default);
@@ -180,9 +206,10 @@ namespace FirstPerson
         public static Vector3 GetCameraPos(this SanctuaryPet pet, float cameraOffset)
         {
             var customOffset = Main.GetRidingCameraOffset(pet.GetTypeSettings()._Name);
-            var t = ((Transform)_mSeatBone.GetValue(pet));
+            var t = pet.GetSeatBone();
             return t.position + t.up * (cameraOffset + customOffset.y) + t.forward * customOffset.z + t.right * customOffset.x + ((Vector3)_mAvatarMountOffset.GetValue(pet));
         }
+        public static Transform GetSeatBone(this SanctuaryPet pet) => (Transform)_mSeatBone.GetValue(pet);
 
         static FieldInfo _mTurnFactor = typeof(AvAvatarController).GetField("mTurnFactor", ~BindingFlags.Default);
         public static float GetTurnFactor(this AvAvatarController controller) => (float)_mTurnFactor.GetValue(controller);
@@ -196,6 +223,7 @@ namespace FirstPerson
         public static float x = 0;
         public static float y = 0;
         public static Vector3 camOffset = Vector3.up * 1.5f;
+        public static float previousPet = 1000;
         static bool lockMouse = true;
         public static int updatesSinceUpdate = 0;
         public static bool LockMouse
@@ -214,7 +242,7 @@ namespace FirstPerson
             Patch_GetKAAxis.blockHorizontal = false;
             Patch_GetKAAxis.blockVertical = false;
             Patch_AvatarVelocityUpdate.HorizontalControl = false;
-            if (Main.Enabled && ___mCamData != null && ___mCamData[(int)___mCurLayer].mode == CaAvatarCam.CameraMode.MODE_RELATIVE && (___mForceFreeRotate || AvAvatar.pState != AvAvatarState.NONE) && (!Main.ThirdPersonFlight || (AvAvatar.pSubState != AvAvatarSubState.FLYING && AvAvatar.pSubState != AvAvatarSubState.GLIDING)) && AvAvatar.pSubState != AvAvatarSubState.WALLCLIMB && !(MyRoomsIntMain.pInstance && MyRoomsIntMain.pInstance.pIsBuildMode))
+            if (Main.Enabled && ___mCamData != null && ___mCamData[(int)___mCurLayer].mode == CaAvatarCam.CameraMode.MODE_RELATIVE && (___mForceFreeRotate || AvAvatar.pState != AvAvatarState.NONE) && (Main.FlightMode != FlightMode.ThirdPerson || (AvAvatar.pSubState != AvAvatarSubState.FLYING && AvAvatar.pSubState != AvAvatarSubState.GLIDING)) && AvAvatar.pSubState != AvAvatarSubState.WALLCLIMB && !(MyRoomsIntMain.pInstance && MyRoomsIntMain.pInstance.pIsBuildMode))
             {
                 var data = ___mCamData[(int)___mCurLayer];
                 var controller = data.lookAt?.GetComponent<AvAvatarController>();
@@ -227,15 +255,28 @@ namespace FirstPerson
                         y = data.offset.y;
                         Main.CheckLockMouse();
                     }
-                    if (LockMouse == (Input.GetKey(Main.HoldToUnlockMouse) || !AvAvatar.pInputEnabled || AvAvatar.pState >= AvAvatarState.PAUSED || AvAvatar.pState == AvAvatarState.NONE))
+                    if (LockMouse == (Input.GetKey(Main.HoldToUnlockMouse) || !AvAvatar.pInputEnabled || AvAvatar.pState >= AvAvatarState.PAUSED || AvAvatar.pState == AvAvatarState.NONE || (controller.IsFlyingOrGliding() && Main.FlightMode == FlightMode.FlightControlsCamera)))
                         LockMouse = !LockMouse;
                     var xDelta = LockMouse ? Input.GetAxis("Mouse X") + KAInput.GetAxis("CameraRotationX") : 0;
                     var yDelta = LockMouse ? Input.GetAxis("Mouse Y") + KAInput.GetAxis("CameraRotationY") : 0;
+                    if (controller.IsFlyingOrGliding())
+                    {
+                        var a = Vector3.SignedAngle(controller.transform.forward, Vector3.forward, Vector3.up);
+                        if (Main.FlightMode == FlightMode.FlightMovesCamera && Math.Abs(previousPet - a) < 10)
+                            xDelta += (previousPet - a) * 0.5f;
+                        previousPet = a;
+                    }
                     x = (x + xDelta * Main.LookSensitivity) % 360;
                     y = Mathf.Clamp(y + -yDelta * Main.LookSensitivity, -90, 90);
-                    __instance.camera.transform.rotation = Quaternion.Euler(0, x, 0) * Quaternion.Euler(y, 0, 0);
-                    __instance.camera.transform.position = (controller.pPlayerMounted && SanctuaryManager.pCurPetInstance ? SanctuaryManager.pCurPetInstance.GetCameraPos(0.3f) : (data.lookAt.position + Vector3.up * 1.3f));
-                    if (!Input.GetKey(KeyCode.LeftAlt) && !(controller.IsFlyingOrGliding() && !Main.ControlFlightTurn))
+                    __instance.camera.transform.rotation =
+                        controller.pPlayerMounted && SanctuaryManager.pCurPetInstance && controller.IsFlyingOrGliding() && Main.FlightMode == FlightMode.FlightControlsCamera
+                        ? SanctuaryManager.pCurPetInstance.GetSeatBone().rotation
+                        : (Quaternion.Euler(0, x, 0) * Quaternion.Euler(y, 0, 0));
+                    __instance.camera.transform.position = 
+                        controller.pPlayerMounted && SanctuaryManager.pCurPetInstance
+                        ? SanctuaryManager.pCurPetInstance.GetCameraPos(0.3f)
+                        : (data.lookAt.position + Vector3.up * 1.3f);
+                    if (!Input.GetKey(KeyCode.LeftAlt) && !(controller.IsFlyingOrGliding() && Main.FlightMode != FlightMode.CameraControlsFlight))
                     {
                         Patch_GetKAAxis.blockHorizontal = true;
                         var change = Mathf.DeltaAngle(data.lookAt.eulerAngles.y, x);
