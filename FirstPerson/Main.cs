@@ -17,7 +17,7 @@ using System.Globalization;
 
 namespace FirstPerson
 {
-    [BepInPlugin("com.aidanamite.FirstPerson", "First Person", "1.3.0")]
+    [BepInPlugin("com.aidanamite.FirstPerson", "First Person", "1.3.1")]
     [BepInDependency("com.aidanamite.ConfigTweaks")]
     public class Main : BaseUnityPlugin
     {
@@ -109,10 +109,13 @@ namespace FirstPerson
             else
             {
                 key = Config.OrphanedEntries.Keys.FirstOrDefault(x => x.Key == "ControlFlightTurn");
-                if (Config.OrphanedEntries[key].ToLowerInvariant() == "false")
-                    FlightMode = FlightMode.NoControl;
-                Config.OrphanedEntries.Remove(key);
-                Config.Save();
+                if (key != null)
+                {
+                    if (Config.OrphanedEntries[key].ToLowerInvariant() == "false")
+                        FlightMode = FlightMode.NoControl;
+                    Config.OrphanedEntries.Remove(key);
+                    Config.Save();
+                }
             }
             instance = this;
             Application.focusChanged += FocusChanged;
